@@ -31,13 +31,6 @@ namespace LoggerLib::Datas
         {"ERROR", Utils::Color::RED},
         {"CRITICAL_ERROR", Utils::Color::RED},
     };
-
-    struct LogMessage
-    {
-        const E_Level &Severity;
-        const std::string &content;
-        const size_t time;
-    };
     
 
 } // namespace LoggerLib::Datas

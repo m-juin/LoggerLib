@@ -5,11 +5,11 @@ namespace LoggerLib::Utils
 {
     namespace Color
     {
-        constexpr char *NONE = "\033[0m";
-        constexpr char *RED = "\033[31;1m";
-        constexpr char *WHITE = "\033[37;1m";
-        constexpr char *GREEN = "\033[32;1m";
-        constexpr char *YELLOW = "\033[33;1m";
+        const char *NONE = "\033[0m";
+        const char *RED = "\033[31;1m";
+        const char *WHITE = "\033[37;1m";
+        const char *GREEN = "\033[32;1m";
+        const char *YELLOW = "\033[33;1m";
     } // namespace Color
 
 }
