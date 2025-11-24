@@ -155,31 +155,6 @@ namespace LoggerLib
 				return true;
 			}
 
-			template <typename... Args> static void LogInfo(Args &&...messageContent)
-			{
-				LogMessage(LogLevel::INFO, false, std::forward<Args>(messageContent)...);
-			}
-
-			template <typename... Args> static void LogWarning(Args &&...messageContent)
-			{
-				LogMessage(LogLevel::WARNING, false, std::forward<Args>(messageContent)...);
-			}
-
-			template <typename... Args> static void LogError(Args &&...messageContent)
-			{
-				LogMessage(LogLevel::ERROR, false, std::forward<Args>(messageContent)...);
-			}
-
-			template <typename... Args> static void LogCriticalError(Args &&...messageContent)
-			{
-				LogMessage(LogLevel::CRITICAL_ERROR, false, std::forward<Args>(messageContent)...);
-			}
-
-			template <typename... Args> static void LogDebug(Args &&...messageContent)
-			{
-				LogMessage(LogLevel::DEBUG, false, std::forward<Args>(messageContent)...);
-			}
-
 			Logger() = delete;
 			~Logger()
 			{
