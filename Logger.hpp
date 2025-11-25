@@ -1,18 +1,22 @@
-#pragma once
+#ifndef __LOGGER_HPP__
+#define __LOGGER_HPP__
 
+#include <atomic>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <sstream>
-#include <vector>
+#include <thread>
 
 #include "./Datas.hpp"
 
 namespace LoggerLib
 {
-
 	using LogLevel = LoggerLib::Datas::E_Level;
 
 	class Logger
@@ -23,33 +27,60 @@ namespace LoggerLib
 					bool writeDate;
 					bool writeTime;
 					bool uniqueLogFile;
-					LoggerParameters(bool writeDate_, bool writeTime_, bool uniqueLogFile_)
-						: writeDate(writeDate_), writeTime(writeTime_), uniqueLogFile(uniqueLogFile_)
+					bool threaded;
+
+					LoggerParameters(bool writeDate_, bool writeTime_, bool uniqueLogFile_, bool threaded_)
+						: writeDate(writeDate_), writeTime(writeTime_), uniqueLogFile(uniqueLogFile_),
+						  threaded(threaded_)
+					{
+					}
+			};
+
+			struct MessageData
+			{
+					std::string severity;
+					std::string message;
+					std::string colorCode;
+					bool printColor;
+					bool writeDate;
+					bool writeTime;
+
+					MessageData( const std::string &sev, const std::string &msg, const std::string &color, bool colorFlag,
+								bool date, bool time)
+						: severity(sev), message(msg), colorCode(color), printColor(colorFlag), writeDate(date),
+						  writeTime(time)
 					{
 					}
 			};
 
 			inline static std::unique_ptr<Logger> instance = nullptr;
 
-			std::mutex _logMutex;
-
-			LoggerParameters params;
+			LoggerParameters _params;
 			LogLevel _loggingLevel;
-
 			std::unique_ptr<std::ostream> _ownedStream;
 			std::ostream *_loggingTarget = nullptr;
 
-			bool printcolor;
+			std::unique_ptr<std::thread> _thread = nullptr;
+			std::mutex _queueMutex;
+			std::atomic<bool> _threadStop;
+			std::condition_variable _cv;
+
+			std::mutex _logMutex;
+
+
+			std::queue<MessageData> _waitingMessage;
+
+			bool _printcolor;
 
 			Logger(const LogLevel &level, std::ostream &fd, LoggerParameters params_)
-				: params(params_), _loggingLevel(level), _loggingTarget(&fd),
-				  printcolor((&fd == &std::cout) || (&fd == &std::cerr))
+				: _params(params_), _loggingLevel(level), _loggingTarget(&fd),
+				  _threadStop(false), _printcolor((&fd == &std::cout) || (&fd == &std::cerr))
 			{
 			}
 
 			Logger(const LogLevel &level, std::unique_ptr<std::ostream> fd, LoggerParameters params_)
-				: params(params_), _loggingLevel(level), _ownedStream(std::move(fd)),
-				  _loggingTarget(_ownedStream.get()), printcolor(false)
+				: _params(params_), _loggingLevel(level), _ownedStream(std::move(fd)),
+				  _loggingTarget(_ownedStream.get()), _threadStop(false), _printcolor(false)
 			{
 			}
 
@@ -67,6 +98,23 @@ namespace LoggerLib
 					   << std::setw(2) << tm.tm_sec << " ";
 				}
 				return ss.str();
+			}
+
+			void PrintMessage(const MessageData &msgData)
+			{
+				// auto data = Datas::datas[static_cast<int>(msgData.severity)];
+
+				std::stringstream finalMsg;
+
+				std::time_t st = std::time(nullptr);
+				auto tm = *std::localtime(&st);
+				finalMsg << FormatTime(tm, msgData.writeDate, msgData.writeTime);
+
+				finalMsg << (msgData.printColor ? msgData.colorCode : "") << "[" << msgData.severity << "] " << msgData.message
+						 << (msgData.printColor ? Utils::Color::NONE : "");
+
+				std::lock_guard<std::mutex> logLock(_logMutex);
+				(*_loggingTarget) << finalMsg.str() << std::endl;
 			}
 
 			static std::string GenerateUniqueFilename(const std::string &basePath, bool uniqueLogFile)
@@ -91,46 +139,72 @@ namespace LoggerLib
 				return fileName.str();
 			}
 
+			void ProcessMessages()
+			{
+				while (true)
+				{
+					std::unique_lock<std::mutex> lock(_queueMutex);
+					_cv.wait(lock, [this]() { return !_waitingMessage.empty() || _threadStop.load(); });
+
+					if (_threadStop.load() && _waitingMessage.empty())
+					{
+						return;
+					}
+
+					if (!_waitingMessage.empty())
+					{
+						auto message = std::move(_waitingMessage.front());
+						_waitingMessage.pop();
+						lock.unlock();
+
+						PrintMessage(message);
+					}
+				}
+			}
+
+			void StartThread()
+			{
+				_threadStop = false;
+				_thread = std::make_unique<std::thread>([this]() { this->ProcessMessages(); });
+			}
+
 		public:
 			template <typename... Args>
 			static void LogMessage(const LogLevel &severity, bool forceSeverity, Args &&...messageContent)
 			{
 				if (!instance)
 					return;
-				if ((forceSeverity == false && severity < instance->_loggingLevel) ||
-					instance->_loggingLevel == LogLevel::NONE)
+				if ((!forceSeverity && severity < instance->_loggingLevel) || instance->_loggingLevel == LogLevel::NONE)
 					return;
 
-				auto data = Datas::datas[static_cast<int>(severity)];
+				std::stringstream msgStream;
+				((msgStream << std::forward<Args>(messageContent)), ...);
+				std::string messageStr = msgStream.str();
 
-				std::stringstream msg;
+				auto &data = Datas::datas[static_cast<int>(severity)];
 
-                std::time_t st = std::time(nullptr);
-                auto tm = *localtime(&st);
+				MessageData msgData(data.name, messageStr, data.colorCode, instance->_printcolor,
+									instance->_params.writeDate, instance->_params.writeTime);
 
-                msg << FormatTime(tm, instance->params.writeDate, instance->params.writeTime);
-
-				msg << (instance->printcolor ? data.colorCode : "") << "[" << data.name << "] ";
-
-				if constexpr (sizeof...(Args) > 0)
+				if (instance->_params.threaded)
 				{
-					(msg << ... << std::forward<Args>(messageContent));
+					std::lock_guard<std::mutex> lock(instance->_queueMutex);
+					instance->_waitingMessage.push(std::move(msgData));
+					instance->_cv.notify_one();
 				}
-
-				std::string str = msg.str();
-
-				std::unique_lock<std::mutex> lock(instance->_logMutex);
-				(*instance->_loggingTarget) << str << (instance->printcolor ? Utils::Color::NONE : "") << std::endl;
+				else
+				{
+					instance->PrintMessage(msgData);
+				}
 			}
 
 			static bool InitLogger(const LogLevel &level, std::string filePath = "",
-								   LoggerParameters params_ = LoggerParameters(true, true, true))
+								   LoggerParameters params_ = LoggerParameters(true, true, true, false))
 			{
+				if (filePath.empty() && !params_.uniqueLogFile)
+					return InitLogger(level, std::cout, params_);
 
-                if (filePath.empty() == true && params_.uniqueLogFile == false)
-                    return InitLogger(level, std::cout, params_);
-
-                filePath = GenerateUniqueFilename(filePath, params_.uniqueLogFile);
+				filePath = GenerateUniqueFilename(filePath, params_.uniqueLogFile);
 				auto file = std::make_unique<std::ofstream>(filePath);
 
 				if (!file->is_open())
@@ -143,21 +217,54 @@ namespace LoggerLib
 				}
 
 				instance = std::unique_ptr<Logger>(new Logger(level, std::move(file), params_));
+				if (params_.threaded)
+				{
+					instance->StartThread();
+				}
 				LogMessage(LogLevel::INFO, true, "Logger initialized.");
 				return true;
 			}
 
 			static bool InitLogger(const LogLevel &level, std::ostream &fd,
-								   LoggerParameters params_ = LoggerParameters(true, true, true))
+								   LoggerParameters params_ = LoggerParameters(true, true, true, false))
 			{
 				instance = std::unique_ptr<Logger>(new Logger(level, fd, params_));
+				if (params_.threaded)
+				{
+					instance->StartThread();
+				}
 				LogMessage(LogLevel::INFO, true, "Logger initialized.");
 				return true;
 			}
 
+			static void Shutdown()
+			{
+				if (instance)
+				{
+					instance->_threadStop = true;
+					instance->_cv.notify_one();
+
+					if (instance->_thread && instance->_thread->joinable())
+					{
+						instance->_thread->join();
+					}
+
+					instance.reset();
+				}
+			}
+
 			Logger() = delete;
+
 			~Logger()
 			{
+				_threadStop = true;
+				_cv.notify_one();
+
+				if (_thread && _thread->joinable())
+				{
+					_thread->join();
+				}
+
 				if (_ownedStream)
 				{
 					if (auto *file = dynamic_cast<std::ofstream *>(_ownedStream.get()))
@@ -169,3 +276,5 @@ namespace LoggerLib
 	};
 
 } // namespace LoggerLib
+
+#endif // __LOGGER_HPP__

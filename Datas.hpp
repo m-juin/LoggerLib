@@ -8,30 +8,26 @@
 
 namespace LoggerLib::Datas
 {
-    enum class E_Level
-    {
-        NONE = -1,
-        DEBUG = 0,
-        INFO = 1,
-        WARNING = 2,
-        ERROR = 3,
-        CRITICAL_ERROR = 4
-    };
+	enum class E_Level
+	{
+		NONE = -1,
+		DEBUG = 0,
+		INFO = 1,
+		WARNING = 2,
+		ERROR = 3,
+		CRITICAL_ERROR = 4
+	};
 
-    struct LevelDatas
-    {
-        const std::string name;
-        const std::string colorCode;
-    };
+	struct LevelDatas
+	{
+			const std::string name;
+			const std::string colorCode;
+	};
 
-    static const std::vector<LevelDatas> datas {
-        {"DEBUG", Utils::Color::GREEN},
-        {"INFO", Utils::Color::WHITE},
-        {"WARNING", Utils::Color::YELLOW},
-        {"ERROR", Utils::Color::RED},
-        {"CRITICAL_ERROR", Utils::Color::RED},
-    };
-    
+	static const std::vector<LevelDatas> datas{
+		{"DEBUG", Utils::Color::GREEN}, {"INFO", Utils::Color::WHITE},		   {"WARNING", Utils::Color::YELLOW},
+		{"ERROR", Utils::Color::RED},	{"CRITICAL_ERROR", Utils::Color::RED},
+	};
 
 } // namespace LoggerLib::Datas
 
